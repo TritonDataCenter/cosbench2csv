@@ -1,0 +1,126 @@
+#!/usr/bin/env node
+/* vim: set ft=javascript: */
+
+/*
+ * cosbench2csv: convert plaintext data in the form produced by cosbench into a
+ * format suitable for importing into other CSV applications.  The expected
+ * input format is the format that you can fetch from the cosbench web interface
+ * during a live run by clicking one of the icons on the live graph.  Example
+ * input:
+ *
+ *     0, 1, 2, 3, 4, ...
+ *
+ *     read :
+ *     2048771, 3133755, 5838160, 5106238, 4773711, ...
+ *
+ *     write :
+ *     1749531, 3297240, 5861835, 5064208, 4832513, ...
+ *
+ * Example output:
+ *
+ *     time,read,write
+ *     0,2048771,1749531
+ *     1,3133755,3297240
+ *     2,5838160,5861835
+ *
+ * This implementation is not currently streaming because it's more convenient
+ * to avoid any external dependencies.
+ */
+
+var mod_assert = require('assert');
+
+function main()
+{
+	var input = '';
+
+	if (process.stdin.isTTY) {
+		console.error('cosbench2csv: reading from tty');
+	}
+
+	process.stdin.on('data', function (c) {
+		input += c.toString('utf8');
+	});
+
+	process.stdin.on('end', function () {
+		cosbench2csv(input);
+	});
+}
+
+function cosbench2csv(input)
+{
+	var lines;
+	var labels = [ 'time' ];
+	var series = [];
+	var points;
+	var npoints = null;
+	var i;
+
+	/*
+	 * cosbench uses two carriage returns to separate lines, but for
+	 * simplicity we'll allow any number of either carriage returns or
+	 * newlines to separate logical lines.  This has the side effect of
+	 * ignoring blank lines except for a possible last line, which we filter
+	 * out explicitly.
+	 */
+	lines = input.split(/[\r\n]+/).filter(
+	    function (l) { return (l.length > 0); });
+	if (lines.length === 0) {
+		fail('no lines found');
+	}
+
+	/* JSSTYLED */
+	points = lines[0].split(/\s*,\s*/);
+	npoints = points.length;
+	series.push(points);
+
+	for (i = 1; i + 1 < lines.length; i += 2) {
+		if (!/.*\s*:\s*$/.test(lines[i]) ||
+		    lines[i].indexOf(',') != -1) {
+			fail('line ' + (i + 1) + ': expected series label');
+		}
+
+		labels.push(lines[i].replace(/\s*:\s*$/, ''));
+		/* JSSTYLED */
+		points = lines[i + 1].split(/\s*,\s*/);
+		series.push(points);
+
+		if (points.length == 1) {
+			fail('line ' + (i + 2) + ': expected data points');
+		} else if (npoints != points.length) {
+			warn('line ' + (i + 2) + ': expected ' +
+			    npoints + ' points, but found ' + points.length);
+		}
+	}
+
+	if (i != lines.length) {
+		warn('unexpected number of lines (' +
+		    i + ', ' + lines.length + ')');
+	}
+
+	mod_assert.equal(series.length, labels.length);
+	process.stdout.write(labels.join(',') + '\n');
+	for (i = 0; i < npoints; i++) {
+		process.stdout.write(series.map(function (s) {
+			if (i < s.length)
+				return (s[i]);
+			return ('');
+		}).join(',') + '\n');
+	}
+}
+
+function warn(msg)
+{
+	/* Don't use printf-like version where we don't have it. */
+	mod_assert.equal(arguments.length, 1);
+	console.error('cosbench2csv: %s', msg);
+}
+
+function fail(msg)
+{
+	/* Don't use printf-like version where we don't have it. */
+	mod_assert.equal(arguments.length, 1);
+	console.error('cosbench2csv: %s', msg);
+	process.exit(1);
+}
+
+main();
